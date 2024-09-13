@@ -20,6 +20,7 @@ def scan_ecojson(path):
             match = p.match(fbase)
             if match and fext == '.json':
                 ecodict = {'ecosite_id': fbase}
+                ecodict['mlra'] = fbase[1:5]
                 full_path = os.path.join(root, f)
                 rel_path = full_path.replace(path, '').lstrip(os.path.sep)
                 print("Reading", rel_path)
@@ -59,12 +60,13 @@ def convert_ecolist_df(ecolist, sp_df = None):
     #      dom_sp = pd.wide_to_long(dom_gh,
     #                               stubnames='dominant', suffix = r'[A-Za-z]{4,5}',
     #                               i = ['ecosite_id', 'rank'], j = 'gh').reset_index()
+
     edf = pd.DataFrame.from_dict(ecolist)
     names2 = edf['ecosite_name_2'].to_list()
-    
-    pz_search = [re.search(r'(\d+)\s*[\-\+]\s*(\d+)?"?\s*P\.?Z\.?', x) for x in names2]
+    pz_search = [re.search(r'^(\d+)\s*[\-\+to]*\s*(\d+)?"?\s*P?\.?Z?\.?$', x) for x in names2]
     pz_groups = [x.groups() if x is not None else (None, None) for x in pz_search]
-    pz_df = pd.DataFrame.from_records(pz_groups, columns =['pz_l', 'pz_h']).fillna(value=np.nan)
+    pz_df = pd.DataFrame.from_records(pz_groups, columns =['pz_l', 'pz_h']).astype(float)\
+            .fillna(value=np.nan)
     pz_float = pz_df.apply(pd.to_numeric)
     ndf = edf.join(pz_float)
 
@@ -75,7 +77,28 @@ def convert_ecolist_df(ecolist, sp_df = None):
 
     return nndf
          
-           
+def split_sites(df):
+    site_dict = df[['ecosite_id', 'mlra', 'asc_sites', 'sim_sites']].to_dict('records')
+    asc_dlist = []
+    sim_dlist = []
+    for d in site_dict:
+        ecosite_id = d.get('ecosite_id')
+        mlra = d.get('mlra')
+        asc_sites = d.get('asc_sites')
+        if asc_sites:
+            asc_list = asc_sites.split(';')
+            for a in asc_list:
+                asc_dlist.append({'mlra': mlra, 'ecosite_id': ecosite_id, 'asc_site': a})
+        sim_sites = d.get('sim_sites')
+        if sim_sites:
+            sim_list = sim_sites.split(';')
+            for s in sim_list:
+                sim_dlist.append({'mlra': mlra, 'ecosite_id': ecosite_id, 'sim_site': s})
+    asc_df = pd.DataFrame(asc_dlist)
+    sim_df = pd.DataFrame(sim_dlist)
+
+    return (asc_df, sim_df)
+
 if __name__ == "__main__":
     argv = sys.argv[1:]
     
@@ -108,13 +131,23 @@ if __name__ == "__main__":
     #  else:
     #      species_df = None
 
-    eco_df = convert_ecolist_df(ecolist, sp_df = None): 
+    eco_df = convert_ecolist_df(ecolist = elist, sp_df = None) 
 
     if os.path.splitext(args.outpath)[1] == '.csv':
-        eco_df.to_csv(args.outpath, index=False)
+        if os.path.isfile(args.outpath):
+            eco_df.to_csv(args.outpath, header=False, index=False, mode='a')
+        else:
+            eco_df.to_csv(args.outpath, header=True, index=False, mode='w')
     else:
         con = sqlite.connect(args.outpath)
-        nrows = eco_df.to_sql(name='general_info', con=con, index=False, if_exists='replace')
+        nrows = eco_df.to_sql(name='general_info', con=con, index=False, if_exists='append')
+        asc_sites, sim_sites = split_sites(df=eco_df)
+        if not asc_sites.empty:
+            a_nrows = asc_sites.to_sql(name='sites_associated', con=con, index=False, 
+                                       if_exists='append')
+        if not sim_sites.empty:
+            s_nrows = sim_sites.to_sql(name='sites_similar', con=con, index=False, 
+                                       if_exists='append')
         con.close()
 
     print('\nScript finished.\n')
