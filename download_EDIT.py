@@ -7,7 +7,10 @@ import sys
 import re
 from pathlib import Path
 
-TIMEOUT = 10
+TIMEOUT = 60
+OLD_URL = r'https://edit.jornada.nmsu.edu'
+BASE_URL = r'https://edit.sc.egov.usda.gov'
+
 
 def get_ecolist(path):
     with open(path, 'r', encoding='utf8') as f:
@@ -15,8 +18,8 @@ def get_ecolist(path):
     return lines
 
 def get_from_edit(ecolist, save_path):
-    l = 'https://edit.jornada.nmsu.edu/services/descriptions/{catalog}/{geoUnit}/{ecoclass}'
-    lp = 'https://edit.jornada.nmsu.edu/services/downloads/{catalog}/{geoUnit}/{item}'
+    l = f'{BASE_URL}/services/descriptions/{catalog}/{geoUnit}/{ecoclass}'
+    lp = f'{BASE_URL}/services/downloads/{catalog}/{geoUnit}/{item}'
     esd_pat = re.compile(r'^[FRG](\d{3}[A-Z]).+')
     for ecoclass in ecolist:
         print('Downloading ', ecoclass, '...', sep = '')
@@ -103,7 +106,7 @@ def send_request(link, path, save = True):
 
 def get_catalog(path, catalog = 'esd', save = False):
     geo_unit_list = None
-    base_link = 'https://edit.jornada.nmsu.edu/services/downloads/{catalog}/'
+    base_link = f'{BASE_URL}/services/downloads/{catalog}/'
     links = ['geo-unit-list.json']
     add_links = ['geo-unit-list.txt',
                  'class-list.txt']
@@ -126,8 +129,8 @@ def get_catalog(path, catalog = 'esd', save = False):
 
 def get_geoUnit(geoUnit, path, catalog = 'esd', save = True):
     class_list = None
-    base_text = 'https://edit.jornada.nmsu.edu/services/downloads/{catalog}/'
-    base_pdf = 'https://edit.jornada.nmsu.edu/services/descriptions/{catalog}/'
+    base_text = f'{BASE_URL}/services/downloads/{catalog}/'
+    base_pdf = f'{BASE_URL}/services/descriptions/{catalog}/'
     links = ['{geoUnit}/class-list.json']
     add_links = ['{geoUnit}/class-list.txt',
                  '{geoUnit}/climatic-features.txt',
@@ -172,8 +175,8 @@ def get_geoUnit(geoUnit, path, catalog = 'esd', save = True):
 
 def get_ecoclass(ecoclass, geoUnit, path, catalog = 'esd', save = True, aux = True):
     state_list = None
-    base_desc = 'https://edit.jornada.nmsu.edu/services/descriptions/{catalog}/{geoUnit}/'
-    base_model = 'https://edit.jornada.nmsu.edu/services/models/{catalog}/{geoUnit}/'
+    base_desc = f'{BASE_URL}/services/descriptions/{catalog}/{geoUnit}/'
+    base_model = f'{BASE_URL}/services/models/{catalog}/{geoUnit}/'
     links = ['{ecoclass}/states.json']
     add_links = ['{ecoclass}.json',
              '{ecoclass}/overview.json',
@@ -216,7 +219,7 @@ def get_ecoclass(ecoclass, geoUnit, path, catalog = 'esd', save = True, aux = Tr
 
 def get_community(community, state, landUse, ecoclass, geoUnit, path, catalog = 'esd', save = True):
     prod_list = None
-    base = ('https://edit.jornada.nmsu.edu/services/plant-community-tables/'
+    base = (f'{BASE_URL}/services/plant-community-tables/'
             '{catalog}/{geoUnit}/{ecoclass}/')
     links = ['{landUse}/{state}/{community}/annual-production.json']
     add_links = ['{landUse}/{state}/{community}/canopy-structure.json',
