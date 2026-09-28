@@ -192,6 +192,7 @@ phys_nom_widen <- function(phys_nom) {
              case_when(property == "slope shape across" ~ "shapeacross",
                        property == "slope shape up-down" ~ "shapedown",
                        TRUE ~ property)) |>
+    mutate(property = str_replace_all(property, r"([^a-zA-Z]+)", "_")) |>
     mutate(property_value = ifelse(property == "aspect",
                                    str_replace(property_value, "north", "N"),
                                    property_value)) |>
@@ -312,7 +313,7 @@ pm_widen <- function(pm) {
 
 # soil profile
 soil_profile_widen <- function(soil_profile) {
-  soil_profile_wide <- soil_profile |>
+  soil_profile_long <- soil_profile |>
     rename(l = representative_low, h = representative_high, dept = top_depth,
            depb = bottom_depth) |>
     mutate(property =
@@ -334,7 +335,17 @@ soil_profile_widen <- function(soil_profile) {
            measurement_unit = str_replace(measurement_unit, "%", "pct")) |>
     mutate(measurement_unit = str_replace(measurement_unit, "/", "_")) |>
     unite(prop_unit_cmb, all_of(c("property", "measurement_unit")), sep = "_",
-          na.rm = TRUE) |>
+          na.rm = TRUE)
+
+  soil_profile_mean <- soil_profile_long |>
+    mutate(thick = depb - dept) |>
+    group_by(ecosite_id, prop_unit_cmb) |>
+    summarize(dept = min(dept), depb = max(depb),
+              l = weighted.mean(l, thick),
+              h = weighted.mean(h, thick),
+              n = n(), .groups = "drop")
+
+  soil_profile_wide <- soil_profile_mean |>
     pivot_wider(id_cols = c("ecosite_id"),
                 names_from = "prop_unit_cmb",
                 values_from = c("l", "h", "dept", "depb"),
@@ -387,7 +398,20 @@ combine_tables <- function(scan_dir, db_path = NULL) {
       for (i in seq_along(table_list)) {
         tbl_df <- table_list[[i]]
         tbl_name <- names(table_list)[i]
-        dbWriteTable(con, tbl_name, tbl_df, append = TRUE)
+        fields <- colnames(tbl_df)
+        field_str <- paste(fields, collapse = ", ")
+        param_str <- paste(paste0(":", fields), collapse = ", ")
+        isql <- glue("
+        INSERT OR REPLACE INTO {tbl_name} ({field_str}) VALUES ({param_str});
+        ")
+        print(glue("Inserting into {tbl_name}..."))
+        success <- dbWithTransaction(con, {
+          stmt <- dbSendStatement(con, isql)
+          # on.exit(dbClearResult(stmt), add = TRUE)
+          dbBind(stmt, tbl_df)
+          dbClearResult(stmt)
+        })
+        # dbWriteTable(con, tbl_name, tbl_df, append = TRUE)
       }
     }
 
@@ -396,8 +420,11 @@ combine_tables <- function(scan_dir, db_path = NULL) {
     if (!is.null(table_list[["class_list"]])) {
       full_df <- table_list[["class_list"]]
 
+      # begin individual joins
       if (!is.null(table_list[["annual_production"]])) {
         if (nrow(table_list[["annual_production"]]) > 0) {
+
+          print("Widening annual_production...")
           aprod_wide <-
             annual_prod_widen(aprod = table_list[["annual_production"]])
           full_df <- full_df |>
@@ -407,9 +434,11 @@ combine_tables <- function(scan_dir, db_path = NULL) {
 
       if (!is.null(table_list[["rangeland_plant_composition"]])) {
         if (nrow(table_list[["rangeland_plant_composition"]]) > 0) {
+          print("Widening rangeland_plant_composition...")
           rcomp_final <-
             range_composition_widen(
-              rcomp = table_list[["rangeland_plant_composition"]])
+              rcomp = table_list[["rangeland_plant_composition"]]
+            )
           full_df <- full_df |>
             left_join(rcomp_final, by = c("ecosite_id" = "ecosite_id"))
         }
@@ -417,6 +446,7 @@ combine_tables <- function(scan_dir, db_path = NULL) {
 
       if (!is.null(table_list[["climatic_features"]])) {
         if (nrow(table_list[["climatic_features"]]) > 0) {
+          print("Widening climatic_features...")
           clim_feat_wide <-
             clim_feat_widen(clim_feat = table_list[["climatic_features"]])
           full_df <- full_df |>
@@ -426,6 +456,7 @@ combine_tables <- function(scan_dir, db_path = NULL) {
 
       if (!is.null(table_list[["landforms"]])) {
         if (nrow(table_list[["landforms"]]) > 0) {
+          print("Widening landforms...")
           landforms_wide <-
             landforms_widen(landforms = table_list[["landforms"]])
           full_df <- full_df |>
@@ -435,9 +466,11 @@ combine_tables <- function(scan_dir, db_path = NULL) {
 
       if (!is.null(table_list[["physiographic_interval_properties"]])) {
         if (nrow(table_list[["physiographic_interval_properties"]]) > 0) {
+          print("Widening physiographic_interval_properties...")
           phys_int_wide <-
             phys_int_widen(
-              phys_int = table_list[["physiographic_interval_properties"]])
+              phys_int = table_list[["physiographic_interval_properties"]]
+            )
           full_df <- full_df |>
             left_join(phys_int_wide, by = c("ecosite_id" = "ecosite_id"))
         }
@@ -447,7 +480,8 @@ combine_tables <- function(scan_dir, db_path = NULL) {
         if (nrow(table_list[["physiographic_nominal_properties"]]) > 0) {
           phys_nom_wide <-
             phys_nom_widen(
-              phys_nom = table_list[["physiographic_nominal_properties"]])
+              phys_nom = table_list[["physiographic_nominal_properties"]]
+            )
           full_df <- full_df |>
             left_join(phys_nom_wide, by = c("ecosite_id" = "ecosite_id"))
         }
@@ -455,9 +489,11 @@ combine_tables <- function(scan_dir, db_path = NULL) {
 
       if (!is.null(table_list[["physiographic_ordinal_properties"]])) {
         if (nrow(table_list[["physiographic_ordinal_properties"]]) > 0) {
+          print("Widening physiographic_ordinal_properties...")
           phys_ord_wide <-
             phys_ord_widen(
-              phys_ord = table_list[["physiographic_ordinal_properties"]])
+              phys_ord = table_list[["physiographic_ordinal_properties"]]
+            )
           full_df <- full_df |>
             left_join(phys_ord_wide, by = c("ecosite_id" = "ecosite_id"))
         }
@@ -465,6 +501,7 @@ combine_tables <- function(scan_dir, db_path = NULL) {
 
       if (!is.null(table_list[["soil_interval_properties"]])) {
         if (nrow(table_list[["soil_interval_properties"]]) > 0) {
+          print("Widening soil_interval_properties...")
           soil_int_wide <-
             soil_int_widen(soil_int = table_list[["soil_interval_properties"]])
           full_df <- full_df |>
@@ -474,6 +511,7 @@ combine_tables <- function(scan_dir, db_path = NULL) {
 
       if (!is.null(table_list[["soil_nominal_properties"]])) {
         if (nrow(table_list[["soil_nominal_properties"]]) > 0) {
+          print("Widening soil_nominal_properties...")
           soil_nom_wide <-
             soil_nom_widen(soil_nom = table_list[["soil_nominal_properties"]])
           full_df <- full_df |>
@@ -483,6 +521,7 @@ combine_tables <- function(scan_dir, db_path = NULL) {
 
       if (!is.null(table_list[["soil_ordinal_properties"]])) {
         if (nrow(table_list[["soil_ordinal_properties"]]) > 0) {
+          print("Widening soil_ordinal_properties...")
           soil_ord_wide <-
             soil_ord_widen(soil_ord = table_list[["soil_ordinal_properties"]])
           full_df <- full_df |>
@@ -492,6 +531,7 @@ combine_tables <- function(scan_dir, db_path = NULL) {
 
       if (!is.null(table_list[["soil_parent_material"]])) {
         if (nrow(table_list[["soil_parent_material"]]) > 0) {
+          print("Widening soil_parent_material...")
           pm_wide <- pm_widen(pm = table_list[["soil_parent_material"]])
           full_df <- full_df |>
             left_join(pm_wide, by = c("ecosite_id" = "ecosite_id"))
@@ -500,6 +540,7 @@ combine_tables <- function(scan_dir, db_path = NULL) {
 
       if (!is.null(table_list[["soil_profile_properties"]])) {
         if (nrow(table_list[["soil_profile_properties"]]) > 0) {
+          print("Widening soil_profile_properties...")
           soil_profile_wide <-
             soil_profile_widen(soil_profile =
                                table_list[["soil_profile_properties"]])
@@ -510,6 +551,7 @@ combine_tables <- function(scan_dir, db_path = NULL) {
 
       if (!is.null(table_list[["soil_surface_textures"]])) {
         if (nrow(table_list[["soil_surface_textures"]]) > 0) {
+          print("Widening soil_surface_textures...")
           soil_stex_wide <-
             soil_stex_widen(soil_stex = table_list[["soil_surface_textures"]])
           full_df <- full_df |>
@@ -521,14 +563,29 @@ combine_tables <- function(scan_dir, db_path = NULL) {
         avail_tables <- dbListTables(con)
         # in case of column mismatch
         if ("ecosite_wide" %in% avail_tables) {
-          ecosite_wide <- dbReadTable(con, "ecosite_wide")
-          new_wide <- bind_rows(ecosite_wide, full_df)
-          dbWriteTable(con, "ecosite_wide", new_wide, overwrite = TRUE)
+          # ecosite_wide <- dbReadTable(con, "ecosite_wide") |> tibble()
+          # new_wide <- bind_rows(ecosite_wide, full_df)
+          # dbWriteTable(con, "ecosite_wide", new_wide, overwrite = TRUE)
+          fields <- colnames(full_df)
+          field_str <- paste(fields, collapse = ", ")
+          param_str <- paste(paste0(":", fields), collapse = ", ")
+          isql <- glue("
+          INSERT OR REPLACE INTO ecosite_wide ({field_str})
+          VALUES ({param_str});
+          ")
+          print(glue("Inserting into ecosite_wide..."))
+          success <- dbWithTransaction(con, {
+            stmt <- dbSendStatement(con, isql)
+            # on.exit(dbClearResult(stmt), add = TRUE)
+            dbBind(stmt, full_df)
+            dbClearResult(stmt)
+          })
         } else {
           dbWriteTable(con, "ecosite_wide", full_df, overwrite = FALSE)
         }
       }
-    }
+      # end individual joins
+    }  # end if class_list stmt
   }
 
   if (!is.null(con)) {
@@ -551,9 +608,10 @@ if (sys.nframe() == 0) {
   option_list <- list(
     make_option(c("-d", "--db_path"),
                 help = "path to an SQLite database"),
-    make_option(c("-s", "--save_long"), action="store_true", default=FALSE,
-                help = paste("import long versions of individual tables into",
-                             "database [default]")),
+    # make_option(c("-s", "--save_long"), action = "store_true",
+    #             default = FALSE,
+    #             help = paste("import long versions of individual tables into",
+    #                          "database [default]")),
     make_option(c("-o", "--out_file"),
                 help = "path to save a CSV version of the final wide table")
   )
