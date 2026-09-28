@@ -10,7 +10,8 @@ import sqlite3 as sqlite
 
 
 def scan_ecojson(path):
-    p = re.compile(r'[A-Z]\d{3}[A-Z]{2}\d{3}[A-Z]{2}')
+    p = re.compile(r'([A-Z])(\d{3})([A-Z])([A-Z])(\d{3})([A-Z]{2})')
+    p2 = re.compile(r'([A-Z]{2})(\d{3})([A-Z])(\d{2})([A-Z])(\d{3})')  # newer code format
     ecolist = []
     for root, dirs, files in os.walk(path):
         for f in files:
@@ -18,9 +19,15 @@ def scan_ecojson(path):
             fbase = fsplit[0]
             fext = fsplit[1]
             match = p.match(fbase)
-            if match and fext == '.json':
+            match2 = p2.match(fbase)
+            if (match or match2) and fext == '.json':
                 ecodict = {'ecosite_id': fbase}
-                ecodict['mlra'] = fbase[1:5]
+                if match:
+                    ecodict['mlra'] = ''.join(match.group(2,3))
+                elif match2:
+                    ecodict['mlra'] = ''.join(match2.group(2,3))
+                else:
+                    raise ValueError("Couldn't match MLRA from ecosite id.")
                 full_path = os.path.join(root, f)
                 rel_path = full_path.replace(path, '').lstrip(os.path.sep)
                 print("Reading", rel_path)
@@ -101,7 +108,7 @@ def split_sites(df):
 
 if __name__ == "__main__":
     argv = sys.argv[1:]
-    
+
     parser = argparse.ArgumentParser(description='Retrieve certain data in individual ecosite JSON'
                                                  ' files.')
     parser.add_argument('scanpath', help='directory to recursively scan for ecosite JSON files')
@@ -131,7 +138,7 @@ if __name__ == "__main__":
     #  else:
     #      species_df = None
 
-    eco_df = convert_ecolist_df(ecolist = elist, sp_df = None) 
+    eco_df = convert_ecolist_df(ecolist = elist, sp_df = None)
 
     if os.path.splitext(args.outpath)[1] == '.csv':
         if os.path.isfile(args.outpath):
@@ -143,10 +150,10 @@ if __name__ == "__main__":
         nrows = eco_df.to_sql(name='general_info', con=con, index=False, if_exists='append')
         asc_sites, sim_sites = split_sites(df=eco_df)
         if not asc_sites.empty:
-            a_nrows = asc_sites.to_sql(name='sites_associated', con=con, index=False, 
+            a_nrows = asc_sites.to_sql(name='sites_associated', con=con, index=False,
                                        if_exists='append')
         if not sim_sites.empty:
-            s_nrows = sim_sites.to_sql(name='sites_similar', con=con, index=False, 
+            s_nrows = sim_sites.to_sql(name='sites_similar', con=con, index=False,
                                        if_exists='append')
         con.close()
 
